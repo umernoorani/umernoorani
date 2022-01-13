@@ -1,0 +1,409 @@
+  /*                                                                         ////////////////////////////////////
+ *                                                                        /////////DOC.BOTS IoT DEVICE////////
+ *                                                                       ////////////////////////////////////
+ *                                                                       
+ * this code reads the temprature and humidity from  dht11 and shows its on 20x4 lcd and uploaded it to thinkspeak 
+ * and triggers an email if the temprature is increased and decreased from the defined limit.
+ * this code uploaded the readings on thingpseak with the interval of 20 seconds and email with the interval of 30minutes if the 
+ * tempratures crosses the defined boundary.
+ * 
+ * components required
+ * 1- 20x4 LCD
+ * 2- I2C module
+ * 3- DHT11 module
+ * 4- NODEMCU ESP8266
+ * 
+ * pins configuration
+ * connect I2C's SCL pin with NodeMCU D1 pin
+ * Connect I2C's SDA pin with NodeMCU D2 pin
+ * Connect I2C's GND pin with NodeMCU GND pin
+ * Connect I2C's VCC pin with NodeMCU VU pin
+ * 
+ * Connect DHT11 data pin with NodeMCU D5 pin
+ * Connect DHT11 GND pin with NodeMCU GND pin
+ * Connect DHT11 VCC pin with NodeMCU VU pin
+ * 
+ * Created: 2/1/2021 2:01:10 PM
+ * Author : Engr. Umer Noorani
+ * you can contact me on whatsapp: +923162032967
+ * you can email me on: docbot11@gmail.com || umernoorani90@gmail.com
+ * you can follow me on linkedin: https://www.linkedin.com/in/umernoorani/
+ * 
+ */
+
+
+
+
+////ThESE library you can add via Include Library > Manage Library > 
+#include <ESP8266WiFi.h>
+#include "secrets.h"
+#include "ThingSpeak.h" 
+#include <Wire.h> // This library is already built in to the Arduino IDE
+#include <LiquidCrystal_I2C.h> 
+LiquidCrystal_I2C lcd(0x26, 20, 4); //kindly replace the 0x26 with your I2C address
+#include <Arduino.h>
+#if defined(ESP32)
+#include <WiFi.h>
+#elif defined(ESP8266)
+#include <ESP8266WiFi.h>
+#endif
+#include <ESP_Mail_Client.h>
+#define SMTP_HOST "smtp.gmail.com" //set the SMtp host if your email id is not gmail.
+int count=0;
+/** The smtp port e.g. 
+ * 25  or esp_mail_smtp_port_25
+ * 465 or esp_mail_smtp_port_465
+ * 587 or esp_mail_smtp_port_587
+*/
+#define SMTP_PORT 587 //SET THE PORT NUMBER ACCORDING TO YOUR EMAIL SERVER
+
+/* The sign in credentials */
+#define AUTHOR_EMAIL "docbot11@gmail.com"// yout email ID and make sure that you have turned on less secure app from your email account
+#define AUTHOR_PASSWORD "**********" //ENTER YOUR E MAIL ID PASSWORD
+
+/* The SMTP Session object used for Email sending */
+SMTPSession smtp;
+
+/* Callback function to get the Email sending status */
+void smtpCallback(SMTP_Status status);
+
+const char rootCACert[] PROGMEM = "-----BEGIN CERTIFICATE-----\n"
+                                  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+
+                                  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+                                  "-----END CERTIFICATE-----\n";
+
+#include "DHT.h"
+
+#define DHTPIN 14
+#define DHTTYPE DHT11   // DHT 22  (AM2302), AM2321
+DHT dht(DHTPIN, DHTTYPE);
+char ssid[] = SECRET_SSID;   // your network SSID (name) 
+char pass[] = SECRET_PASS;   // your network password
+int keyIndex = 0;            // your network key Index number (needed only for WEP)
+WiFiClient  client;
+
+unsigned long myChannelNumber = SECRET_CH_ID;
+const char * myWriteAPIKey = SECRET_WRITE_APIKEY;
+
+// Initialize our values
+String myStatus = "";
+
+void setup() {
+  Serial.begin(115200);  // Initialize serial
+  
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for Leonardo native USB port only
+  }
+   Wire.begin(D2, D1); //(SDA, SCL) 
+ dht.begin();
+ lcd.init();  // initializing the LCD
+ lcd.backlight();
+  WiFi.mode(WIFI_STA); 
+  ThingSpeak.begin(client);  // Initialize ThingSpeak
+}
+
+void loop() {
+
+  // Connect or reconnect to WiFi
+  count++;
+  if(WiFi.status() != WL_CONNECTED){
+    Serial.print("Attempting to connect to SSID: ");
+    lcd.setCursor(2, 0);  
+    lcd.print("DOC.BOTS IoT DEVICE");
+    lcd.setCursor(2, 1);  
+    lcd.print(SECRET_SSID);
+    Serial.println(SECRET_SSID);
+   lcd.setCursor(5, 2);  
+    lcd.print("Connecting");
+    while(WiFi.status() != WL_CONNECTED){
+      WiFi.begin(ssid, pass);  // Connect to WPA/WPA2 network. Change this line if using open or WEP network
+      Serial.print(".");
+      delay(5000);     
+    } 
+    Serial.println("\nConnected.");
+    //lcd.clear();
+  }
+float h = dht.readHumidity();
+  // Read temperature as Celsius (the default)
+  float t = dht.readTemperature();
+lcd.setCursor(2, 0);  
+lcd.print("DOC.BOTS IoT DEVICE"); 
+lcd.setCursor(2, 1);  
+    lcd.print(SECRET_SSID);
+lcd.setCursor(1, 2);  
+lcd.print("Temprature: ");  
+lcd.setCursor(13, 2); 
+lcd.print(t); // Start Printing
+lcd.setCursor(18, 2);  
+lcd.print("C");
+lcd.setCursor(2, 3);  
+lcd.print("Humidity: "); 
+lcd.setCursor(12, 3); 
+lcd.print(h); 
+lcd.setCursor(17, 3);  
+lcd.print("%");
+  
+  // set the fields with the values
+  ThingSpeak.setField(1, t);
+  ThingSpeak.setField(2, h);
+
+  ThingSpeak.setStatus(myStatus);
+  
+  // write to the ThingSpeak channel
+  int x = ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
+  if(x == 200){
+    Serial.println("Channel update successful.");
+  }
+  else{
+    Serial.println("Problem updating channel. HTTP error code " + String(x));
+  }
+  if (t>27 && count>31)
+  {
+    ///////////////////////////////////////////////////////////EMAIL//////////////////////////////////////////////////////////
+ 
+  {
+    #if defined(ARDUINO_ARCH_SAMD)
+  while (!Serial)
+    ;
+  Serial.println();
+  Serial.println("**** Custom built WiFiNINA firmware need to be installed.****\nTo install firmware, read the instruction here, https://github.com/mobizt/ESP-Mail-Client#install-custom-built-wifinina-firmware");
+
+#endif
+
+  Serial.println();
+
+  Serial.print("Connecting to AP");
+
+  WiFi.begin(SECRET_SSID, SECRET_PASS);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(200);
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected.");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+  smtp.debug(1);
+  smtp.callback(smtpCallback);
+  ESP_Mail_Session session;
+  session.server.host_name = SMTP_HOST;
+  session.server.port = SMTP_PORT;
+  session.login.email = AUTHOR_EMAIL;
+  session.login.password = AUTHOR_PASSWORD;
+  session.login.user_domain = "mydomain.net";
+
+  /* Declare the message class */
+  SMTP_Message message;
+
+  /* Set the message headers */
+  message.sender.name = "DOC.BOTS IoT DEVICE ALERT";
+  message.sender.email = AUTHOR_EMAIL;
+  message.subject = "Temprature Rised";
+  message.addRecipient("DOC.BOTS IoT DEVICE", "docbot11@gmail.com");
+
+  String textMsg = "This is simple plain text message";
+  message.text.content = textMsg.c_str();
+  message.text.charSet = "us-ascii";
+
+  /** The content transfer encoding e.g.
+   * enc_7bit or "7bit" (not encoded)
+   * enc_qp or "quoted-printable" (encoded)
+   * enc_base64 or "base64" (encoded)
+   * enc_binary or "binary" (not encoded)
+   * enc_8bit or "8bit" (not encoded)
+   * The default value is "7bit"
+  */
+  message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
+
+  /** The message priority
+   * esp_mail_smtp_priority_high or 1
+   * esp_mail_smtp_priority_normal or 3
+   * esp_mail_smtp_priority_low or 5
+   * The default value is esp_mail_smtp_priority_low
+  */
+  message.priority = esp_mail_smtp_priority::esp_mail_smtp_priority_low;
+
+  /** The Delivery Status Notifications e.g.
+   * esp_mail_smtp_notify_never
+   * esp_mail_smtp_notify_success
+   * esp_mail_smtp_notify_failure
+   * esp_mail_smtp_notify_delay
+   * The default value is esp_mail_smtp_notify_never
+  */
+  //message.response.notify = esp_mail_smtp_notify_success | esp_mail_smtp_notify_failure | esp_mail_smtp_notify_delay;
+
+  /* Set the custom message header */
+  message.addHeader("Message-ID: <abcde.fghij@gmail.com>");
+
+  //For Root CA certificate verification (ESP8266 and ESP32 only)
+  //session.certificate.cert_data = rootCACert;
+  //or
+  //session.certificate.cert_file = "/path/to/der/file";
+  //session.certificate.cert_file_storage_type = esp_mail_file_storage_type_flash; // esp_mail_file_storage_type_sd
+  //session.certificate.verify = true;
+
+  //The WiFiNINA firmware the Root CA certification can be added via the option in Firmware update tool in Arduino IDE
+
+  /* Connect to server with the session config */
+  if (!smtp.connect(&session))
+    return;
+
+  /* Start sending Email and close the session */
+  if (!MailClient.sendMail(&smtp, &message))
+    Serial.println("Error sending Email, " + smtp.errorReason());
+
+  //to clear sending result log
+  //smtp.sendingResult.clear();
+
+  ESP_MAIL_PRINTF("Free Heap: %d\n", MailClient.getFreeHeap());
+  count=0;
+}
+////////////////////////////////////////////////////////////EMAIL////////////////////////////////////////////////////
+  }
+
+ else if(t<17 && count>31)
+ {
+  ///////////////////////////////////////////////////////////EMAIL//////////////////////////////////////////////////////////
+ 
+  {
+    #if defined(ARDUINO_ARCH_SAMD)
+  while (!Serial)
+    ;
+  Serial.println();
+  Serial.println("**** Custom built WiFiNINA firmware need to be installed.****\nTo install firmware, read the instruction here, https://github.com/mobizt/ESP-Mail-Client#install-custom-built-wifinina-firmware");
+
+#endif
+
+  Serial.println();
+
+  Serial.print("Connecting to AP");
+
+  WiFi.begin(SECRET_SSID, SECRET_PASS);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(200);
+  }
+
+  Serial.println("");
+  Serial.println("WiFi connected.");
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+  smtp.debug(1);
+  smtp.callback(smtpCallback);
+  ESP_Mail_Session session;
+  session.server.host_name = SMTP_HOST;
+  session.server.port = SMTP_PORT;
+  session.login.email = AUTHOR_EMAIL;
+  session.login.password = AUTHOR_PASSWORD;
+  session.login.user_domain = "mydomain.net";
+
+  /* Declare the message class */
+  SMTP_Message message;
+
+  /* Set the message headers */
+  message.sender.name = "DOC.BOTS IoT DEVICE ALERT";
+  message.sender.email = AUTHOR_EMAIL;
+  message.subject = "Tempratures Decreased";
+  message.addRecipient("DOC.BOTS IoT DEVICE", "docbot11@gmail.com");
+
+  String textMsg = "This is simple plain text message";
+  message.text.content = textMsg.c_str();
+  message.text.charSet = "us-ascii";
+
+  /** The content transfer encoding e.g.
+   * enc_7bit or "7bit" (not encoded)
+   * enc_qp or "quoted-printable" (encoded)
+   * enc_base64 or "base64" (encoded)
+   * enc_binary or "binary" (not encoded)
+   * enc_8bit or "8bit" (not encoded)
+   * The default value is "7bit"
+  */
+  message.text.transfer_encoding = Content_Transfer_Encoding::enc_7bit;
+
+  /** The message priority
+   * esp_mail_smtp_priority_high or 1
+   * esp_mail_smtp_priority_normal or 3
+   * esp_mail_smtp_priority_low or 5
+   * The default value is esp_mail_smtp_priority_low
+  */
+  message.priority = esp_mail_smtp_priority::esp_mail_smtp_priority_low;
+
+  /** The Delivery Status Notifications e.g.
+   * esp_mail_smtp_notify_never
+   * esp_mail_smtp_notify_success
+   * esp_mail_smtp_notify_failure
+   * esp_mail_smtp_notify_delay
+   * The default value is esp_mail_smtp_notify_never
+  */
+  //message.response.notify = esp_mail_smtp_notify_success | esp_mail_smtp_notify_failure | esp_mail_smtp_notify_delay;
+
+  /* Set the custom message header */
+  message.addHeader("Message-ID: <abcde.fghij@gmail.com>");
+
+  //For Root CA certificate verification (ESP8266 and ESP32 only)
+  //session.certificate.cert_data = rootCACert;
+  //or
+  //session.certificate.cert_file = "/path/to/der/file";
+  //session.certificate.cert_file_storage_type = esp_mail_file_storage_type_flash; // esp_mail_file_storage_type_sd
+  //session.certificate.verify = true;
+
+  //The WiFiNINA firmware the Root CA certification can be added via the option in Firmware update tool in Arduino IDE
+
+  /* Connect to server with the session config */
+  if (!smtp.connect(&session))
+    return;
+
+  /* Start sending Email and close the session */
+  if (!MailClient.sendMail(&smtp, &message))
+    Serial.println("Error sending Email, " + smtp.errorReason());
+
+  //to clear sending result log
+  //smtp.sendingResult.clear();
+
+  ESP_MAIL_PRINTF("Free Heap: %d\n", MailClient.getFreeHeap());
+  count=0;
+}
+////////////////////////////////////////////////////////////EMAIL////////////////////////////////////////////////////
+ }
+ 
+  Serial.print("count: ");
+  Serial.println(count);
+  delay(20000); // Wait 20 seconds to update the channel again
+}
+
+void smtpCallback(SMTP_Status status)
+{
+  /* Print the current status */
+  Serial.println(status.info());
+
+  /* Print the sending result */
+  if (status.success())
+  {
+    Serial.println("----------------");
+    ESP_MAIL_PRINTF("Message sent success: %d\n", status.completedCount());
+    ESP_MAIL_PRINTF("Message sent failled: %d\n", status.failedCount());
+    Serial.println("----------------\n");
+    struct tm dt;
+
+    for (size_t i = 0; i < smtp.sendingResult.size(); i++)
+    {
+      /* Get the result item */
+      SMTP_Result result = smtp.sendingResult.getItem(i);
+      time_t ts = (time_t)result.timestamp;
+      localtime_r(&ts, &dt);
+
+      ESP_MAIL_PRINTF("Message No: %d\n", i + 1);
+      ESP_MAIL_PRINTF("Status: %s\n", result.completed ? "success" : "failed");
+      ESP_MAIL_PRINTF("Date/Time: %d/%d/%d %d:%d:%d\n", dt.tm_year + 1900, dt.tm_mon + 1, dt.tm_mday, dt.tm_hour, dt.tm_min, dt.tm_sec);
+      ESP_MAIL_PRINTF("Recipient: %s\n", result.recipients);
+      ESP_MAIL_PRINTF("Subject: %s\n", result.subject);
+    }
+    Serial.println("----------------\n");
+  }
+}
